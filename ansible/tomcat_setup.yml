@@ -3,20 +3,30 @@
   become: yes
   vars:
     tom_url: https://archive.apache.org/dist/tomcat/tomcat-8/v8.5.37/bin/apache-tomcat-8.5.37.tar.gz
+    jdk25_arch: "{{ 'aarch64' if ansible_architecture == 'aarch64' else 'x64' }}"
 
   tasks:
-    - name: Install JDK on Centos 6/7
-      yum:
-        name: java-1.8.0-openjdk.x86_64
-        state: present
-      when: ansible_distribution == 'CentOS'
+    - name: Verify the host supports Java 25
+      assert:
+        that:
+          - (ansible_distribution == 'Ubuntu' and ansible_distribution_major_version | int >= 20) or (ansible_distribution in ['CentOS', 'Rocky', 'AlmaLinux'] and ansible_distribution_major_version | int >= 8)
+          - ansible_architecture in ['x86_64', 'aarch64']
+        fail_msg: "Java 25 deployment requires Ubuntu 20+, CentOS/Rocky/AlmaLinux 8+, and x86_64 or aarch64."
 
-    - name: Install JDK on Ubuntu 14/15/16/18
-      apt:
-        name: openjdk-8-jdk
-        state: present
-        update_cache: yes
-      when: ansible_distribution == 'Ubuntu' 
+    - name: Download Temurin JDK 25
+      get_url:
+        url: "https://api.adoptium.net/v3/binary/latest/25/ga/linux/{{jdk25_arch}}/jdk/hotspot/normal/eclipse"
+        dest: /tmp/temurin-jdk-25.tar.gz
+        mode: "0644"
+
+    - name: Install Temurin JDK 25
+      unarchive:
+        src: /tmp/temurin-jdk-25.tar.gz
+        dest: /opt/java-25
+        remote_src: yes
+        extra_opts:
+          - --strip-components=1
+        creates: /opt/java-25/bin/java
 
     - name: Download Tomcat Tar Ball/Binaries
       get_url:
@@ -63,51 +73,18 @@
         group: tomcat
         recurse: yes
 
-    - name: Setup tomcat SVC file on Centos 7
+    - name: Setup Tomcat systemd service
       template:
-         src: templates/epel7-svcfile.j2
+         src: templates/tomcat.service.j2
          dest: /etc/systemd/system/tomcat.service
-         mode: "a+x"
-      when: ansible_distribution == 'CentOS' and ansible_distribution_major_version == '7'      
+         mode: "0644"
 
-    - name: Setup tomcat SVC file on Centos 6
-      template:
-         src: templates/epel6-svcfile.j2
-         dest: /etc/init.d/tomcat
-         mode: "a+x"
-      when: ansible_distribution == 'CentOS' and ansible_distribution_major_version == '6'
-
-    - name: Setup tomcat SVC file on ubuntu 14/15
-      template:
-         src: templates/ubuntu14_15-svcfile.j2
-         dest: /etc/init.d/tomcat
-         mode: "a+x"
-      when: ansible_distribution == 'Ubuntu' and ansible_distribution_major_version < '16'
-
-    - name: Setup tomcat SVC file on ubuntu 16 and 18
-      template:
-         src: templates/ubuntu16-svcfile.j2
-         dest: /etc/systemd/system/tomcat.service
-         mode: "a+x"
-      when: ansible_distribution == 'Ubuntu' and ansible_distribution_major_version >= '16'
-
-    - name: Reload tomcat svc config in ubuntu 14/15
-      command: update-rc.d tomcat defaults
-      when: ansible_distribution == 'Ubuntu' and ansible_distribution_major_version < '16'
-
-    - name: Reload tomcat svc config in Centos 6
-      command: chkconfig --add tomcat
-      when: ansible_distribution == 'CentOS' and ansible_distribution_major_version == '6'
-
-    - name: just force systemd to reread configs (2.4 and above)
+    - name: Reload systemd configuration
       systemd:
         daemon_reload: yes 
-      when: ansible_distribution_major_version > '6' or ansible_distribution_major_version > '15'
 
-    - name: Start & Enable TOmcat 8
+    - name: Start and enable Tomcat
       service:
         name: tomcat
         state: started
         enabled: yes
-
-   
