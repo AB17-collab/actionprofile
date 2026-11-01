@@ -13,6 +13,9 @@ on:
   schedule:
     - cron: "10 14 * * 1-5" # Runs at 2:00 AM UTC every day
 
+permissions:
+  contents: read
+
 
 jobs:
   Build:
@@ -27,6 +30,17 @@ jobs:
         run: mvn install
 
         
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vprofile-app
+          path: target/*.war
+
+      - name: Notify if Build Fails
+        if: failure()
+        run: echo "Build failed! Please check the logs for details."
+
+
   Testing:
     runs-on: ubuntu-latest
     needs: Build
